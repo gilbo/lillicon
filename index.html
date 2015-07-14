@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+/*  
+ *  index.html
+ *    (main file for Lillicon tool)
+ *  
+ *  Copyright 2015 Gilbert Bernstein
+ *  Copyright 2015 Adobe Systems Inc.
+ *  
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *  
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *  
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+-->
+  <head>
+    <meta charset="utf-8">
+    <title>SVG View</title>
+
+    <style media="screen">
+      body {
+      }
+      #rawcanvas {
+        width:100%;
+        min-height: 480px;
+        /*height:90%;*/
+        border:1px solid lightgray;
+        cursor: default;
+      }
+      #papercanvas {
+        display: none;
+      }
+    </style>
+
+    <!-- dependencies -->
+    <script src="bower_components/jquery/dist/jquery.js"></script>
+    <script src="bower_components/paper/dist/paper-full.js"></script>
+    <script src="bower_components/FileSaver/FileSaver.js"></script>
+
+    <!-- emscripten based library and wrapper -->
+    <script src="emtriangle_port/libtriangle.js"></script>
+    <script src="emtriangle_port/emtriangle.js"></script>
+
+    <!-- my code -->
+    <script src="js/rawdisplay.js"></script>
+
+    <script src="js/numeric_subroutines.js"></script>
+    <script src="js/linalg.js"></script>
+    <script src="js/primitives.js"></script>
+    <script src="js/isct.js"></script>
+    <script src="js/constraints.js"></script>
+    <script src="js/contours.js"></script>
+    <script src="js/planarmap.js"></script>
+
+    <script src="js/analysis.js"></script>
+    <script src="js/solver.js"></script>
+    <script src="js/widgets.js"></script>
+    <script src="js/selectiongeometry.js"></script>
+    <script src="js/selections.js"></script>
+
+    <script src="js/docstate.js"></script>
+    <script src="js/uiaction.js"></script>
+    <script src="js/uibureau.js"></script>
+
+    <script src="js/svgparse.js"></script>
+
+    <script>
+    // Dump Stack Frames in the Browser Debug Console
+    window.onerror = function(msg, url, line, col, error) {
+      // Note that col & error are new to the HTML 5 spec and may not be 
+      // supported in every browser.  It worked for me in Chrome.
+      //var extra = !col ? '' : '\ncolumn: ' + col;
+      //extra += !error ? '' : '\nerror: ' + error;
+
+      // You can view the information in an alert to see things working like this:
+      //console.log("Error: " + msg + "\nurl: " + url + "\nline: " + line + extra);
+      if(error) console.error(error.stack);
+
+      // TODO: Report this error via ajax so you can keep track
+      //       of what pages have JS issues 
+
+      var suppressErrorAlert = false;
+      // If you return true, then error alerts (like in older versions of 
+      // Internet Explorer) will be suppressed.
+      return suppressErrorAlert;
+    };
+    window.debug = {};
+    debug.display_on = false;
+    debug.point_force_consolidate = function(points) {
+      var point_forces = [];
+      points.forEach(function(pt) {
+        var xi = pt.x()._solver_idx;
+        var yi = pt.y()._solver_idx;
+        var xforces = debug.forces_from_field[xi];
+        var yforces = debug.forces_from_field[yi];
+
+        var cmap = new Map;
+        xforces.forEach(function(xf) {
+          if(cmap.has(xf.constraint))
+            cmap.get(xf.constraint).force[0] = xf.force;
+          else
+            cmap.set(xf.constraint, { constraint: xf.constraint,
+                                      force: [xf.force,0] });
+        });
+        yforces.forEach(function(yf) {
+          if(cmap.has(yf.constraint))
+            cmap.get(yf.constraint).force[1] = yf.force;
+          else
+            cmap.set(yf.constraint, { constraint: yf.constraint,
+                                      force:[0,yf.force] });
+        });
+
+        var fs = [];
+        for(var fp of cmap.values()) { fs.push(fp); }
+        point_forces.push({ point: pt, forces: fs });
+      });
+      return point_forces;
+    }
+
+    window.bezier_mode = {};
+    //window.bezier_mode.is_on = true;
+    window.bezier_mode.pt_select = null;
+    </script>
+
+    <script>
+      var is_loaded = false;
+      var svgref;
+      var Vec2 = primitives.Vec2;
+      var Bureau = uibureau.Bureau;
+      var loadedfilename;
+
+      function loadSVG(text) {
+        if(is_loaded) {
+          $('#papercanvas').remove(); // TODO: DOES NOT WORK
+        }
+
+        $('#canvas-container')
+          .append('<canvas id="rawcanvas"></canvas><br>');
+        rawdisplay.setup_canvas('#rawcanvas');
+
+        $('#canvas-container')
+          .append('<canvas width=50 height=50 id="papercanvas"></canvas>');
+        paper.setup($('#papercanvas')[0]);
+
+        // svg load
+        svgref = new paper.Group();
+        svgref.importSVG(text);
+        svgref.remove();
+
+  
+        // ======== DOCUMENT ==========
+
+
+        // The Document controls access to a large portion of state
+        // Ultimately this helps manage logging, undo, and other
+        // kinds of UI automation
+        var doc = docstate.DocState.InitNew(svgparse.parse(svgref));
+        var bureau = Bureau.New(doc);
+
+
+        // ======== WORKSPACE ==========
+
+
+        var show_details = false;
+
+        var w = rawdisplay.width();
+        var h = rawdisplay.height();
+
+        var mini_padding    = 6;
+        var all_mini_width  = 128 + 2*mini_padding;
+        var toolwidth       = 64;
+
+        var workspace = rawdisplay.createWorkspaceViewport({
+          pxrect: { l:all_mini_width, y:0,
+                    w:rawdisplay.width()-all_mini_width-toolwidth,
+                    h:rawdisplay.height()},
+          //viewrect: {x:0,y:0,w:w,h:h},
+          worldbounds: doc.pmap.getBounds(),
+          px_margin: 10,
+          logfunc: function(){},
+        });
+        bureau.setWorkspace(workspace);
+        rawdisplay.addViewport(workspace);
+        workspace.zoomToFit();
+
+  
+        // ======== MINI DISPLAYS ==========
+
+
+        var minitray = widgets.Panel.New({
+          rect: { x:0, y:0, w:all_mini_width, h:rawdisplay.height() }
+        });
+        rawdisplay.addWidget(minitray);
+
+        var tooltray = widgets.Panel.New({
+          rect: { r:w, y:0, w:toolwidth, h:rawdisplay.height() }
+        });
+        rawdisplay.addWidget(tooltray);
+
+        // mini-view objects
+        var mini_y_offset = 0;
+        var miniviews = [128,96,64,48,32,16].map(function(side) {
+          var yoff      = mini_y_offset;
+          var pdside    = side + 2*mini_padding;
+          mini_y_offset += pdside;
+          var xoff      = 0.5*(all_mini_width - pdside);
+
+          var miniPanel = widgets.ViewPanel.New({
+            rect: { x:xoff, y:yoff, w:pdside, h:pdside },
+            worldbounds: doc.pmap.getBounds(),
+            px_margin: mini_padding,
+          });
+          //var miniPanel = rawdisplay.createViewport({
+          //  pxrect: { x:xoff, y:yoff, w:pdside, h:pdside },
+          //  worldbounds: doc.pmap.getBounds(),
+          //  px_margin: mini_padding,
+          //});
+          //rawdisplay.addViewport(miniPanel);
+          rawdisplay.addWidget(miniPanel);
+          miniPanel.zoomToFit();
+
+          miniPanel.onDraw(function(drawAPI) {
+            drawAPI.setFillStyle('black');
+            doc.pmap.draw(drawAPI);
+            drawAPI.fill();
+          });
+          return {
+            size:  side,
+            panel: miniPanel,
+          };
+        });
+  
+
+        // ======== TOOLS ==========
+
+
+        var tool_y_offset = 0;
+        var tool_buttons = { current: null };
+        // BEGIN HACK
+        var annulus_scale = 80;
+        //workspace.setAnnulusSelect(0.5*annulus_scale);
+        //workspace.setMarqueeSelect();
+        doc.setSelectAnnulusWidthCallback(function() {
+          return workspace.getAnnulusSelect();
+        });
+        //  var w = val * annulus_scale;
+        //  workspace.setAnnulusSelect(w);
+        //workspace.setAnnulusSelect(doc.getSelectAnnulusWidth());
+        //workspace.setMarqueeSelect();
+        function is_annulus_select() {
+          return tool_buttons.current === tool_buttons.rectangle;
+        }
+        // END HACK
+        function clear_tool() {
+          if(tool_buttons.current) {
+            tool_buttons.current.setToggleState(false);
+            tool_buttons.current = null;
+          }
+        }
+        function set_tool(tool) {
+          clear_tool();
+          tool_buttons.current = tool;
+          // BEGIN HACK
+          if(is_annulus_select())
+            workspace.setAnnulusSelect(
+              tool_buttons.select_w.getValue()*annulus_scale);
+          else 
+            workspace.setMarqueeSelect();
+          // END HACK
+        }
+        function toggle_func(name) {
+          return function(is_down) {
+            if(is_down) {
+              set_tool(tool_buttons[name]);
+              bureau.doAction(uiaction.InterpretModeAction.New(doc),
+                              {mode: name});
+            } else {
+              clear_tool();
+              bureau.doAction(uiaction.InterpretModeAction.New(doc),{});
+            }
+          };
+        }
+
+        tool_y_offset += 3;
+        tool_buttons.interpret_as = widgets.Panel.New({
+          text: 'interpret as', textsize: 8,
+          color: 'rgba(0,0,0,0)',
+          rect: { r: w-3, w: toolwidth-6, t: tool_y_offset, h: 20 },
+        });
+        rawdisplay.addWidget(tool_buttons.interpret_as);
+        tool_y_offset += 23;
+
+        tool_buttons.stroke = widgets.ToggleButton.New({
+          text: 'stroke',
+          rect: { r: w-3, w: toolwidth-6, t: tool_y_offset, h: toolwidth-6 },
+        });
+        tool_buttons.stroke.onToggle(toggle_func('stroke'));
+        rawdisplay.addWidget(tool_buttons.stroke);
+        tool_y_offset += toolwidth-3;
+
+        tool_buttons.blob = widgets.ToggleButton.New({
+          text: 'blob',
+          rect: { r: w-3, w: toolwidth-6, t: tool_y_offset, h: toolwidth-6 },
+        });
+        tool_buttons.blob.onToggle(toggle_func('blob'));
+        rawdisplay.addWidget(tool_buttons.blob);
+        tool_y_offset += toolwidth-3;
+
+        // HACK BEGIN
+        tool_buttons.rectangle = widgets.ToggleButton.New({
+          text: 'rectangle',
+          rect: { r: w-3, w: toolwidth-6, t: tool_y_offset, h: toolwidth-6 },
+        });
+        tool_buttons.rectangle.onToggle(toggle_func('rectangle'));
+        rawdisplay.addWidget(tool_buttons.rectangle);
+        tool_y_offset += toolwidth-3;
+
+        tool_buttons.select_w = widgets.Slider.New({
+          rect: { r: w-3-0.15*toolwidth, w: 0.7*toolwidth-6,
+                  t: tool_y_offset, h: 1.5*toolwidth-6 }
+          //alpha: 0.7,
+        });
+        function set_select_w(val, oldval) {
+          var w = val * annulus_scale;
+          workspace.setAnnulusSelect(w);
+          tool_buttons.select_w.setValue(val);
+        }
+        tool_buttons.select_w.onDragStart(set_select_w);
+        tool_buttons.select_w.onDragMove(set_select_w);
+        tool_buttons.select_w.onDragEnd(function(){});
+        rawdisplay.addWidget(tool_buttons.select_w);
+        tool_y_offset += 1.5*toolwidth-3;
+        // HACK END
+
+
+        // ======== MULTI-SELECT ==========
+
+        /*
+        var multi_buttons = {};
+        var multi_bottom = rawdisplay.height() - 3;
+
+        function multi_clear() {
+          console.log('multi-clear exec');
+        }
+        multi_buttons.clear = widgets.Button.New({
+          text: 'Clear [n]',
+          rect: { r: w-3, w: toolwidth-6, b: multi_bottom, h:toolwidth-6 },
+        });
+        multi_buttons.clear.onPress(multi_clear);
+        rawdisplay.onKeyPress('n', multi_clear)
+        rawdisplay.addWidget(multi_buttons.clear);
+        multi_bottom -= toolwidth-3;
+
+        function multi_add() {
+          console.log('multi-add exec');
+        }
+        multi_buttons.add = widgets.Button.New({
+          text: 'Add [m]',
+          rect: { r: w-3, w: toolwidth-6, b: multi_bottom, h:toolwidth-6 },
+        });
+        multi_buttons.add.onPress(multi_add);
+        rawdisplay.onKeyPress('m', multi_add)
+        rawdisplay.addWidget(multi_buttons.add);
+        multi_bottom -= toolwidth-3;
+
+        multi_buttons.header = widgets.Panel.New({
+          text: 'multi-select', textsize: 8,
+          color: 'rgba(0,0,0,0)',
+          rect: { r: w-3, w: toolwidth-6, b: multi_bottom, h: 20 },
+        });
+        rawdisplay.addWidget(multi_buttons.header);
+        multi_bottom -= 23;
+        */
+
+
+        // ======== RESIZE ==========
+
+
+        rawdisplay.onResize(function() {
+          var w = rawdisplay.width();
+          var h = rawdisplay.height();
+          workspace.setPxRect({ x:all_mini_width, y:0,
+                                w:w-all_mini_width-toolwidth, h:h });
+          var aspect = (w-all_mini_width-toolwidth) / h;
+          workspace.setViewAspectRatio(aspect);
+
+          //console.log('allmini',all_mini_width)
+          minitray.setPxRect({ x:0, y:0, w:all_mini_width, h:h });
+          minitray.setViewAspectRatio(all_mini_width/h);
+
+          tooltray.setPxRect({ r:w, y:0, w:toolwidth, h:h });
+          tooltray.setViewAspectRatio(toolwidth/h);
+
+          // don't need to adjust mini views
+
+          // should adjust tools
+          var tw = toolwidth;
+          var yoff = 3;
+          tool_buttons.interpret_as.setPxRect({ r:w-3, y:yoff, w:tw-6, h:20 });
+          yoff += 23;
+          tool_buttons.stroke.setPxRect({ r:w-3, y:yoff, w:tw-6, h:tw-6 });
+          yoff += tw-3;
+          tool_buttons.blob.setPxRect({ r:w-3, y:yoff, w:tw-6, h:tw-6 });
+          yoff += tw-3;
+          // HACK BEGIN
+          tool_buttons.rectangle.setPxRect({ r:w-3, y:yoff, w:tw-6, h:tw-6 });
+          yoff += tw-3;
+          tool_buttons.select_w.setPxRect({ r: w-3-0.15*tw, w: 0.7*tw-6,
+                                            y: yoff, h: 1.5*tw-6 });
+          yoff += 1.5*tw-3;
+          // HACK END
+
+          // adjust multi-select stuff
+          /*
+          var boff = h-3;
+          multi_buttons.clear.setPxRect({ r:w-3, b:boff, w:tw-6, h:tw-6 });
+          boff -= tw-3;
+          multi_buttons.add.setPxRect({ r:w-3, b:boff, w:tw-6, h:tw-6 });
+          boff -= tw-3;
+          multi_buttons.header.setPxRect({ r:w-3, b:boff, w:tw-6, h:20 });
+          boff -= 23;
+          */
+        });
+  
+
+        // ======== DRAW ==========
+
+
+        workspace.onDraw(function(drawAPI) {
+          // DRAW THE ICON
+          drawAPI.setFillStyle('black');
+          doc.pmap.draw(drawAPI);
+          drawAPI.fill();
+
+          if(bezier_mode.is_on) {
+          drawAPI.pushStyle();
+            drawAPI.setStrokeStyle('red');
+            drawAPI.lineWidth(1);
+            drawAPI.setFillStyle('white');
+
+            // UNSAFE USE OF ANALYZER; HACK FOR DEADLINE
+            doc.analyzer._acontours.forEach(function(ac) {
+              var asegs = ac._asegs;
+              // draw the anchors
+              for(var si=0; si<asegs.length; si++) {
+                var curr  = asegs[si];
+                var prev  = asegs[(si)? si-1 : asegs.length-1];
+                var anchor = curr.seg().a0();
+                var is_selected = anchor.is_bezier_selected;
+
+                var a     = curr.seg().a0().getxy();
+                var hout  = null;
+                var hin   = null;
+                if (curr.isArc() || curr.h0Exists())
+                  hout    = curr.seg().h0().getxy();
+                if (prev.isArc() || prev.h1Exists())
+                  hin     = prev.seg().h1().getxy();
+
+                if(is_selected) {
+                  drawAPI.pushStyle();
+                  drawAPI.setStrokeStyle('magenta');
+                  // handle lines
+                  if(hout) {
+                    drawAPI.beginPath();
+                    drawAPI.moveTo(a[0], a[1]);
+                    drawAPI.lineTo(hout[0], hout[1]);
+                    drawAPI.stroke();
+                    //if(curr.isArc()) {
+                    //  var nexta = curr.seg().a1().getxy();
+                    //  drawAPI.beginPath();
+                    //  drawAPI.moveTo(nexta[0], nexta[1]);
+                    //  drawAPI.lineTo(hout[0], hout[1]);
+                    //  drawAPI.stroke();
+                    //}
+                  }
+                  if(hin) {
+                    drawAPI.beginPath();
+                    drawAPI.moveTo(a[0], a[1]);
+                    drawAPI.lineTo(hin[0], hin[1]);
+                    drawAPI.stroke();
+                    //if(prev.isArc()) {
+                    //  var preva = prev.seg().a0().getxy();
+                    //  drawAPI.beginPath();
+                    //  drawAPI.moveTo(preva[0], preva[1]);
+                    //  drawAPI.lineTo(hin[0], hin[1]);
+                    //  drawAPI.stroke();
+                    //}
+                  }
+
+                  // handle points
+                  if(hout) {
+                    drawAPI.beginPath();
+                    drawAPI.pxCirc(hout[0], hout[1], 2.5);
+                    drawAPI.closePath();
+                    drawAPI.fill();
+                    drawAPI.stroke();
+                  }
+                  if(hin) {
+                    drawAPI.beginPath();
+                    drawAPI.pxCirc(hin[0], hin[1], 2.5);
+                    drawAPI.closePath();
+                    drawAPI.fill();
+                    drawAPI.stroke();
+                  }
+
+                  // fill in the anchor point
+                  drawAPI.setFillStyle('magenta');
+                }
+
+                // anchor
+                drawAPI.beginPath();
+                drawAPI.pxSquare(a[0], a[1], 2.5);
+                drawAPI.closePath();
+                drawAPI.fill();
+                drawAPI.stroke();
+
+                if(is_selected) drawAPI.popStyle();
+              }
+            });
+          drawAPI.popStyle();
+            // short circuit the rest of the draw call
+            return;
+          }
+
+          // DRAW ANALYSIS FEEDBACK OPTIONALLY
+          if(show_details) {
+          drawAPI.pushStyle();
+            // DISPLAY QUADRATIC BEZIER HANDLES FOR ARCS
+            drawAPI.setStrokeStyle('red');
+            doc.pmap.forContours(function(c) {
+              var segs = c.segments();
+              for(var k=0; k<segs.length; k++) {
+                var arc = segs[k];
+                if(arc.isArc()) {
+                  var p0 = arc.a0();
+                  var p1 = arc.h();
+                  var p2 = arc.a1();
+
+                  // triangle
+                  drawAPI.beginPath();
+                  drawAPI.moveTo( p0.getx(), p0.gety() );
+                  drawAPI.lineTo( p1.getx(), p1.gety() );
+                  drawAPI.lineTo( p2.getx(), p2.gety() );
+                  //drawAPI.closePath();
+                  drawAPI.stroke();
+                }
+              }
+            });
+            // DISPLAY CIRCLES for CO-CIRCULARITY
+            drawAPI.setStrokeStyle('magenta');
+            doc.circles.forEach(function(c) {
+              var center = c.center();
+              var r = c.radius().get();
+
+              drawAPI.beginPath();
+              drawAPI.circle( center.getx(), center.gety(), r );
+              drawAPI.closePath(); // needed?
+              drawAPI.stroke();
+            })
+            
+            // DISPLAY POLYGON
+            drawAPI.setStrokeStyle('cyan');
+            drawAPI.lineWidth(1.5);
+            for(var k=0; k<doc.polygons.length; k++) {
+              var pgon = doc.polygons[k];
+
+              drawAPI.beginPath();
+              pgon.draw(drawAPI);
+              drawAPI.closePath();
+              drawAPI.stroke();
+            }
+          drawAPI.popStyle();
+          }
+
+          // show selection point set
+          drawAPI.pushStyle();
+            drawAPI.setStrokeStyle('rgb(223,223,31)');
+            drawAPI.lineWidth(6.5);
+            drawAPI.lineCap('round');
+            doc.selectOrProposePoints().forEach(function(pt) {
+              drawAPI.plotDot( pt.getx(), pt.gety() );
+              drawAPI.stroke();
+            });
+          drawAPI.popStyle();
+
+
+          // selection widget depiction
+          function draw_stroke(drawAPI, stroke) {
+            function draw_line(drawAPI, pts) {
+              drawAPI.beginPath();
+              drawAPI.moveTo( pts[0][0], pts[0][1] );
+              for(var k=1; k<pts.length; k++)
+                drawAPI.lineTo( pts[k][0], pts[k][1] );
+              drawAPI.stroke();
+            }
+            var sides = stroke.getSides();
+            drawAPI.lineWidth(1.5);
+            draw_line(drawAPI, stroke.getSpine());
+            drawAPI.lineWidth(2.5);
+            draw_line(drawAPI,
+                      sides.forward.map(function(p) { return p.getxy(); }));
+            draw_line(drawAPI,
+                      sides.reverse.map(function(p) { return p.getxy(); }));
+          }
+          function draw_blob(drawAPI, blob) {
+            var loop = blob.drawableLoop();
+            var center = blob.getCenter();
+            drawAPI.lineWidth(2.5);
+            drawAPI.beginPath();
+            loop.draw(drawAPI);
+            drawAPI.closePath();
+            drawAPI.stroke();
+
+            drawAPI.lineWidth(8);
+            drawAPI.lineCap('round');
+            drawAPI.plotDot( center.getx(), center.gety() );
+            drawAPI.stroke();
+          }
+          function draw_rect_widget(drawAPI, rectwidget) {
+            var rect  = rectwidget.getCurrSides();
+            var w     = rect.r - rect.l;
+            var h     = rect.b - rect.t;
+            drawAPI.lineWidth(2.5);
+            drawAPI.beginPath();
+            drawAPI.rect(rect.l, rect.t, w, h);
+            drawAPI.closePath();
+            drawAPI.stroke();
+          }
+          
+          if(!doc.hasOpenProposal()) {
+            drawAPI.pushStyle();
+              if(doc.select.isBlob()) {
+                drawAPI.setStrokeStyle('rgb(31,223,255)'); // cyan
+                draw_blob(drawAPI, doc.select);
+              }
+              if(doc.select.isStroke()) {
+                drawAPI.setStrokeStyle('rgb(255,31,223)'); // magenta
+                draw_stroke(drawAPI, doc.select);
+              }
+              if(doc.select.isRectangle()) {
+                drawAPI.setStrokeStyle('rgb(31,255,31)'); // green
+                draw_rect_widget(drawAPI, doc.select);
+              }
+            drawAPI.popStyle();
+          }
+          
+
+          if(debug.display_on && debug.solve_stats) {
+            console.log(debug.solve_stats);
+            debug.solve_stats = null;
+          }
+          if(debug.display_on && debug.forces_from_field) {
+            var pointforces = debug.point_force_consolidate(doc.polypoints);
+
+            drawAPI.lineWidth(2);
+            pointforces.forEach(function(ptf) {
+              var xy = ptf.point.getxy();
+              ptf.forces.forEach(function(f) {
+                var head = Vec2.add(xy, Vec2.mul(6, f.force));
+                var cproto = Object.getPrototypeOf(f.constraint);
+                var color = 'green';
+                if(cproto === constraints.ArcSample)  color = 'cyan';
+                if(cproto === constraints.OnCircle)   color = 'magenta';
+                if(cproto === constraints.Colinear)   color = 'red';
+                if(cproto === constraints.ArcWeight)  color = 'blue';
+
+                drawAPI.setStrokeStyle(color);
+                drawAPI.beginPath();
+                drawAPI.moveTo(xy[0], xy[1]);
+                drawAPI.lineTo(head[0], head[1]);
+                drawAPI.stroke();
+              });
+            });
+          }
+
+          //console.log('call draw');
+        });
+        rawdisplay.refresh();
+  
+
+        // ======== MOUSE INTERACTION ==========
+
+
+        function find_closest_point(x,y, points) {
+          var min_dist = Infinity;
+          var best_pt;
+
+          points.forEach(function(pt) {
+            var px = pt.x().get();
+            var py = pt.y().get();
+            var dist = (x-px)*(x-px) + (y-py)*(y-py);
+            if(dist < min_dist) {
+              min_dist = dist;
+              best_pt = pt;
+            }
+          });
+
+          //console.log(x,y,min_dist,best_pt);
+          return best_pt;
+        }
+
+        // Selection / Proposal Interaction
+        workspace.onSelectStart(function(select_obj) {
+          if(bezier_mode.is_on) {
+            // collect relevant data here
+            var cursor = select_obj.anchor; var cxy = cursor;
+            var cutoff = workspace.dxinv(4);
+            var pt = find_closest_point(cxy[0], cxy[1], doc.anchorSet());
+            //var handle = find_closest_point(cxy[0], cxy[1], doc.handleSet());
+
+            // test if we clicked on a point, and if it was already selected
+            var dxy = Vec2.sub(pt.getxy(), cursor);
+            var on_pt = Math.abs(dxy[0]) < cutoff &&
+                        Math.abs(dxy[1]) < cutoff ;
+            var pt_selected = pt.is_bezier_selected;
+            if(!on_pt) pt = undefined;
+
+            // if we clicked directly on a point and we're not intending
+            // to modify a selection, then we should start dragging immediately
+            if(on_pt && !select_obj.invert) {
+              if(!pt_selected)
+                bureau.doAction(uiaction.BezierPointSelectAction.New(doc, pt));
+              return 'dograb';
+            }
+            // if both, re-route to grab behavior
+            //if(on_pt && pt_selected && !select_obj.invert) {
+            //  return 'dograb'; // re-route to grab
+            //}
+            // otherwise, go ahead and start a bezier select action
+            else {
+              bureau.startAction(uiaction.BezierSelectAction.New(
+                doc, pt, cutoff
+              ), select_obj);
+            }
+          }
+          // NON-BEZIER-MODE
+          else {
+            bureau.startAction(uiaction.SelectAction.New(doc, bureau),
+                               select_obj);
+          }
+          rawdisplay.refresh();
+        });
+        workspace.onSelectMove(function(select_obj, x,y,dx,dy) {
+          bureau.continueAction(select_obj);
+          rawdisplay.refresh();
+        });
+        workspace.onSelectEnd(function() {
+          bureau.endAction();
+          rawdisplay.refresh();
+        });
+
+        // Grab interaction
+        workspace.onGrabStart(function(x,y) {
+          if(bezier_mode.is_on) {
+            var pt = find_closest_point(x, y, doc.anchorSet());
+            bureau.startAction(uiaction.BezierDragAction.New(doc, [x,y]));
+          } else {
+            var pt = find_closest_point(x,y, doc.grabdraggablePoints());
+            bureau.startAction(uiaction.GrabDragAction.New(doc, pt));
+          }
+        });
+        workspace.onGrabMove(function(x,y, dx,dy) {
+          bureau.continueAction({ x: x, y: y });
+          rawdisplay.refresh();
+        });
+        workspace.onGrabIdle(function(x,y) {
+          bureau.continueAction({ x: x, y: y });
+          rawdisplay.refresh();
+        });
+        workspace.onGrabEnd(function() {
+          bureau.endAction();
+        });
+  
+
+        // ======== KEY INTERACTION ==========
+
+
+        // Deletion
+        workspace.onKeyPress('Backspace', function(x,y) {
+          if(bezier_mode.is_on) return;
+          console.log('delete!');
+          if(!doc.select.isBlob() && !doc.select.isStroke()) return;
+
+          console.log('deleting selection');
+          bureau.doAction(uiaction.DeleteAction.New(doc));
+          rawdisplay.refresh();
+        })
+
+        // Display Functions
+        //rawdisplay.onKeyPress('d', function(x,y) {
+        //  console.log('debug display on/off');
+        //  debug.display_on = !debug.display_on;
+        //  rawdisplay.refresh();
+        //})
+        rawdisplay.onKeyPress('v', function(x,y) {
+          console.log('hide/show analysis guides');
+          show_details = !show_details;
+          rawdisplay.refresh();
+        });
+        //workspace.onKeyPress('f', function(x,y) {
+        //  if(bezier_mode.is_on) return;
+        //  console.log('debug forces acting on a point');
+        //  x = workspace.x(x);
+        //  y = workspace.y(y); // translate px to view/world coordinates
+        //  var pt = find_closest_point(x,y, doc.polypoints);
+        //  var forces = doc.slv.debugForcesOnPoint(pt);
+        //  console.log(forces);
+        //  console.log(forces.map(function(f) { return f.force; }));
+        //});
+
+
+        // UNDO
+        function undo_handle(x,y) {
+          console.log('undo');
+          bureau.undo();
+          rawdisplay.refresh();
+        }
+        rawdisplay.onKeyPress('u', undo_handle);
+        rawdisplay.onKeyPress('z', undo_handle);
+
+
+
+  
+
+        // ======== FILE I/O ==========
+
+
+        // saving stuff
+        function save_log() {
+          var logname = loadedfilename;
+          if(logname.substr(logname.length-4) === '.svg')
+            logname = logname.substr(0, logname.length-4);
+          logname = logname+'.log';
+
+          var log = bureau.getLog();
+          var blob = new Blob(log, {type: "text/plain;charset=utf-8"});
+          saveAs(blob, logname);
+
+          console.log('save log '+logname);
+        }
+        $('#save_icon').click(function() {
+          var outpaper = doc.pmap.paper();
+          var svgout = new paper.Group();
+          svgout.addChild(outpaper);
+          svgout.remove();
+          var ret = svgout.exportSVG();
+
+          var bd = svgout.bounds;
+          var prefix = '<svg version="1.2" baseProfile="tiny" '+
+            'xmlns="http://www.w3.org/2000/svg" '+
+            'viewBox="'+bd.left+' '+bd.top+' '+bd.right+' '+bd.bottom+'">';
+          var suffix = '</svg>';
+          var svgstr = prefix + ret.innerHTML + suffix;
+          var blob = new Blob([svgstr], {type: "text/plain;charset=utf-8"});
+          saveAs(blob, loadedfilename);
+          console.log('saveicon '+loadedfilename);
+          save_log();
+        });
+        $('#save_log').click(save_log);
+
+      }
+      // cause loadSVG to be invoked at the right time
+      window.onload = function () {
+        // Load the SVG
+        document.getElementById('file_input').addEventListener('change',
+        function(evt) {
+          var file = evt.target.files[0];
+          var reader = new FileReader();
+          reader.onload = function(e) {
+            // remove the load button now
+            $('#file_input').remove();
+            //console.log(e.target.result);
+            loadSVG(e.target.result);
+          };
+          loadedfilename = file.name;
+          reader.readAsText(file);
+        });
+      };
+    </script>
+  </head>
+  <body>
+    <div class="page-wrap">
+      <input id="file_input" type="file"></input>
+      <button id="save_icon">Save SVG</button>
+      <button id="save_log">Save Log</button>
+      <br />
+      <div id="canvas-container">
+        <!-- Content Attaches Here -->
+      </div>
+      <span>
+        Load SVG file to start (files in iconsvgs/ should load fine); Controls: click and drag to marquee select.  Shift-drag to add/remove to/from selection.  option-drag to move viewport.  scroll-wheel to zoom in/out.  Cmd-drag to drag-move the contour.
+      </span>
+    </div>
+  </body>
+</html>

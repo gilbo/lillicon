@@ -1,0 +1,22 @@
+{
+  "name": "lillicon",
+  "version": "0.0.0",
+  "homepage": "https://github.com/gilbo/lillicon",
+  "authors": [
+    "gilbo <gilbert@gilbertbernstein.com>"
+  ],
+  "license": "MIT",
+  "private": true,
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "FileSaver": "*",
+    "jquery": "~2.1.1",
+    "paper": "~0.9.20"
+  }
+}
