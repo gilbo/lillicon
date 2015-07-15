@@ -785,13 +785,15 @@
 
         // Deletion
         workspace.onKeyPress('Backspace', function(x,y) {
-          if(bezier_mode.is_on) return;
+          //if(bezier_mode.is_on) return;
           console.log('delete!');
           if(!doc.select.isBlob() && !doc.select.isStroke()) return;
 
           console.log('deleting selection');
           bureau.doAction(uiaction.DeleteAction.New(doc));
           rawdisplay.refresh();
+
+          return true
         })
 
         // Display Functions
@@ -870,34 +872,83 @@
       // cause loadSVG to be invoked at the right time
       window.onload = function () {
         // Load the SVG
-        document.getElementById('file_input').addEventListener('change',
-        function(evt) {
+        $('#file_input').change(function(evt) {
           var file = evt.target.files[0];
           var reader = new FileReader();
           reader.onload = function(e) {
             // remove the load button now
-            $('#file_input').remove();
-            //console.log(e.target.result);
+            $('#file_picker').remove();
+            $('#save_buttons').css('visibility','visible');
+            $('#instructions').css('visibility','visible');
             loadSVG(e.target.result);
           };
           loadedfilename = file.name;
           reader.readAsText(file);
         });
+        $('#select_button').click(function(evt) {
+          loadedfilename = $('#select_dropdown').val();
+          var file = 'testsvgs/' + loadedfilename;
+          $.get(file, function( data ) {
+            // remove the load button now
+            $('#file_picker').remove();
+            $('#save_buttons').css('visibility','visible');
+            $('#instructions').css('visibility','visible');
+            loadSVG(data);
+          });
+        })
       };
     </script>
   </head>
   <body>
     <div class="page-wrap">
-      <input id="file_input" type="file"></input>
-      <button id="save_icon">Save SVG</button>
-      <button id="save_log">Save Log</button>
+      <span id="file_picker">
+        Choose an icon
+        <select id="select_dropdown">
+          <option value="3d14.svg">3d Printer</option>
+          <option value="camera52.svg">Camera 1</option>
+          <option value="compact11.svg">Camera 2</option>
+
+          <option value="computer72.svg">Webcam</option>
+          <option value="female109.svg">Baby</option>
+          <option value="person155.svg">Traffic Cop</option>
+
+          <option value="picture12.svg">Picture</option>
+          <option value="postage1.svg">Postage Stamp</option>
+          <option value="temple2.svg">Temple</option>
+
+          <option value="viking4.svg">Ship</option>
+          <option value="wedding4.svg">Rings</option>
+          <option value="wine22.svg">Wine Glass</option>
+          <option value="wine23.svg">Wine Bottle</option>
+        </select>
+        <button id="select_button">Load</button>
+        or load your own from an SVG:
+        <input id="file_input" type="file"></input>
+      </span>
+      <span id="save_buttons" style="visibility:hidden;">
+        <button id="save_icon">Save SVG</button>
+        <button id="save_log">Save Log</button>
+        (See instructions below canvas)
+      </span>
       <br />
       <div id="canvas-container">
         <!-- Content Attaches Here -->
       </div>
-      <span>
-        Load SVG file to start (files in iconsvgs/ should load fine); Controls: click and drag to marquee select.  Shift-drag to add/remove to/from selection.  option-drag to move viewport.  scroll-wheel to zoom in/out.  Cmd-drag to drag-move the contour.
-      </span>
+      <div id="instructions" style="visibility:hidden;">
+        <h3>Lillicon instructions:</h3>
+        <ul>
+          <li><b>scroll wheel:</b> zoom </li>
+          <li><b>'Z' or 'U' key:</b> undo </li>
+          <li><b>click-and-drag:</b> select points </li>
+          <li><b>shift + click-and-drag:</b> modify selection </li>
+          <li><b>option/alt + click-and-drag:</b> pan icon </li>
+          <li><b>cmd/window/meta + click-and-drag:</b>
+            drag contour/selection </li>
+          <li><b>delete/backspace key:</b> delete the existing selection </li>
+        </ul>
+        When possible, Lillicon will try to interpret the existing selection as a transient widget (stroke or blob).  To ensure that Lillicon is trying to interpret the correct widget, you can click the button on the right.<br />
+        The rectangle widget requires that you explicitly select it.  The supplied slider then controls the width of the selection rectangle.
+      </div>
     </div>
   </body>
 </html>

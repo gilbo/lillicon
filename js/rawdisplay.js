@@ -945,8 +945,24 @@ exports.setup_canvas = function(canvas_param) {
   }, false);
 
 
+  var acode = ('a').charCodeAt();
+  var zcode = ('z').charCodeAt();
+  var Acode = ('A').charCodeAt();
+  var Zcode = ('Z').charCodeAt();
+  var offset = acode - Acode;
+  function toLowerCode(code) {
+    if (Acode <= code && code <= Zcode) {
+      return code + offset;
+    }
+    return code;
+  }
+
   // install key event handlers
-  $(window).keypress(function(evt) {
+  $(window).keydown(function(evt) {
+    if(!evt.altKey && !evt.ctrlKey && !evt.metaKey)
+      evt.preventDefault();
+  })
+  $(window).keyup(function(evt) {
   //window.addEventListener('keypress', function(evt) {
     //var modifiers = {
     //  option : !!evt.altKey,
@@ -959,7 +975,7 @@ exports.setup_canvas = function(canvas_param) {
     // first try dispatching to a viewport
     var vp = get_viewport_at(freshx,freshy);
     if(vp) {
-      var clbk = vp._keypress_handlers[evt.which];
+      var clbk = vp._keypress_handlers[toLowerCode(evt.which)];
       var result = clbk;
       if(clbk) result = clbk(freshx, freshy);
 
@@ -967,7 +983,7 @@ exports.setup_canvas = function(canvas_param) {
     }
     // if that fails, then dispatch to global handlers
     if(!vp) {
-      var clbk = global_keypress_callbacks[evt.which];
+      var clbk = global_keypress_callbacks[toLowerCode(evt.which)];
       var result = clbk;
       if(clbk) result = clbk(freshx, freshy);
     }

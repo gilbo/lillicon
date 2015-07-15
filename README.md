@@ -20,6 +20,9 @@ Lillicon runs entirely in the browser, so no installation is necessary.  Just op
 
 Lillicon is made available under the open source Apache 2.0 license.  However, Jonathan Shewchuk's Triangle library retains its own license terms.  In particular, you will need to contact and receive permission from Jonathan Shewchuk to use Triangle in commercial code.  Please see his license for more details.  Feel free to copy gilbert@gilbertbernstein.com on any licensing correspondence you direct towards Jonathan.
 
+### Demo Icons
+
+A number of icons have been included to demonstrate the tool.  They were obtained from flaticon.com.  They are licensed under creative commons, CC-BY 3.0 Freepik.
 
 ## Communication
 
