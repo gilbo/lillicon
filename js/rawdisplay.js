@@ -882,10 +882,11 @@ exports.setup_canvas = function(canvas_param) {
       HOVER_FOCUS = null;
     }
   }
+  //var IS_ON_MACOSX = navigator.userAgent.indexOf('Mac OS X') >= 0;
   canvas.addEventListener('mousedown', function(evt) {
     extract_fresh_event_data(evt);
 
-    if(evt.button === 0) { // left button
+    if(evt.which === 1) { // left button
       mouse_is_down = true;
       lastx = freshx;
       lasty = freshy;
@@ -899,7 +900,7 @@ exports.setup_canvas = function(canvas_param) {
       var vp = get_viewport_at(freshx,freshy);
       if(vp) {
         drag_modifiers.option = !!evt.altKey;
-        drag_modifiers.cmd    = !!evt.metaKey;
+        drag_modifiers.cmd    = !!evt.ctrlKey;
         drag_modifiers.shift  = !!evt.shiftKey;
 
         var response = vp._handle_mousedown(freshx, freshy, drag_modifiers);
@@ -920,7 +921,7 @@ exports.setup_canvas = function(canvas_param) {
     extract_fresh_event_data(evt);
 
     // continue an existing drag if one was registered
-    if((evt.buttons & 1) && drag_target) {
+    if(drag_target) {
       var dx = freshx - lastx;
       var dy = freshy - lasty;
 
@@ -931,15 +932,13 @@ exports.setup_canvas = function(canvas_param) {
       lasty = freshy;
     // otherwise, safety to make sure we clear drags
     // and handle hover behavior
-    } else if(drag_target) {
-      clear_drag();
     } else {
       update_hover();
     }
   }, false);
   canvas.addEventListener('mouseup', function(evt) {
     extract_fresh_event_data(evt);
-    if(evt.button === 0 && drag_target) { // left button
+    if(evt.which === 1 && drag_target) { // left button
       clear_drag();
     }
   }, false);

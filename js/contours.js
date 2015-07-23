@@ -289,7 +289,7 @@ Arc.reverse = function() {
   return a;
 }
 Arc._point_set = function() {
-  return new Set(this._ps);
+  return Set.fromArray(this._ps);
 }
 Arc.testEval = function(t) {
   var ps = [];
@@ -473,7 +473,7 @@ Bezier.a1 = function() { return this._ps[3]; }
 Bezier.h0 = function() { return this._ps[1]; }
 Bezier.h1 = function() { return this._ps[2]; }
 Bezier._point_set = function() {
-  return new Set(this._ps);
+  return Set.fromArray(this._ps);
 }
 Bezier.JSONSnapshot = function(auditor) {
   var ps = this._ps.map(auditor.receiveWith(function(pt) {
@@ -774,7 +774,7 @@ Contour._point_set = function() {
 }
 Contour._anchor_set = function() {
   return this._segs.mapUnion(function(s) {
-    return new Set([s.a0()]);
+    return Set.fromArray([s.a0()]);
   });
 }
 

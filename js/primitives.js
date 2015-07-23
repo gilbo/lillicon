@@ -24,11 +24,25 @@ var exports = on_node? module.exports : window['primitives']={};
 if(typeof Set === 'undefined')
   throw new Error('ECMAScript 6 Set is missing. '+
     'If you\'re on Node try running with option --harmony');
+if(!Set.fromArray) {
+  Set.fromArray = function(arr) {
+    var s = new Set();
+    for(var k=0; k<arr.length; k++) s.add(arr[k]);
+    return s;
+  }
+}
+if(!Set.prototype.clone) {
+  Set.prototype.clone = function() {
+    var cp = new Set();
+    this.forEach(function(x) { cp.add(x); });
+    return cp;
+  }
+}
 if(!Set.prototype.union) {
   Set.prototype.union = function(rhs) {
     if(Object.getPrototypeOf(rhs) !== Set.prototype)
       throw new TypeError('Must union a Set to a Set');
-    var result = new Set(this);
+    var result = this.clone();
     rhs.forEach(function(x) { result.add(x); });
     return result;
   }
@@ -39,7 +53,7 @@ if(!Set.prototype.symmDiff) {
     if(Object.getPrototypeOf(rhs) !== Set.prototype)
       throw new TypeError(
         'Must take symmetric difference of a Set with a Set');
-    var result = new Set(lhs);
+    var result = lhs.clone();
     rhs.forEach(function(x) {
       if(lhs.has(x))  result.delete(x);
       else            result.add(x);

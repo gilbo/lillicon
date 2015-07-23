@@ -1011,7 +1011,7 @@ Analysis.polygons = function() {
 Analysis.polygonPoints = function() {
   return this._acontours.mapUnion(function(ac) {
     var pgon = ac.polygon();
-    return new Set(pgon.points());
+    return Set.fromArray(pgon.points());
   })
 }
 Analysis.constraints = function() {

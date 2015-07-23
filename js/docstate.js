@@ -214,7 +214,7 @@ DocState._compute_bz_proposal = function(select_obj, clicked_pt, cutoff) {
   //var diff = Vec2.sub(closest_point.getxy(), xy);
   //var linf_dist = Math.max(Math.abs(diff[0]), Math.abs(diff[1]));
   if(linf_dist < cutoff && clicked_pt) {
-    indicated_set = new Set([clicked_pt]);
+    indicated_set = Set.fromArray([clicked_pt]);
   } else {
     indicated_set = this._anchor_set.filter(function(pt) {
       var xy = pt.getxy();
@@ -270,7 +270,7 @@ DocState.selectSingleBezierPoint = function(pt) {
     throw new Error('Cannot select single Bezier point while proposal open');
 
   clear_bz_selection_markers(this._bezier_selection);
-  this._bezier_selection = new Set([pt]);
+  this._bezier_selection = Set.fromArray([pt]);
   set_bz_selection_markers(this._bezier_selection);
 }
 
