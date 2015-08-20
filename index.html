@@ -441,7 +441,7 @@
           doc.pmap.draw(drawAPI);
           drawAPI.fill();
 
-          if(bezier_mode.is_on) {
+          if(bezier_mode.is_on || bezier_mode.display_beziers) {
           drawAPI.pushStyle();
             drawAPI.setStrokeStyle('red');
             drawAPI.lineWidth(1);
@@ -454,18 +454,20 @@
               for(var si=0; si<asegs.length; si++) {
                 var curr  = asegs[si];
                 var prev  = asegs[(si)? si-1 : asegs.length-1];
-                var anchor = curr.seg().a0();
+                var currbz = curr.seg().toBezier();
+                var prevbz = prev.seg().toBezier();
+                var anchor = currbz.a0();
                 var is_selected = anchor.is_bezier_selected;
 
-                var a     = curr.seg().a0().getxy();
+                var a     = anchor.getxy();
                 var hout  = null;
                 var hin   = null;
                 if (curr.isArc() || curr.h0Exists())
-                  hout    = curr.seg().h0().getxy();
+                  hout    = currbz.h0().getxy();
                 if (prev.isArc() || prev.h1Exists())
-                  hin     = prev.seg().h1().getxy();
+                  hin     = prevbz.h1().getxy();
 
-                if(is_selected) {
+                //if(is_selected) {
                   drawAPI.pushStyle();
                   drawAPI.setStrokeStyle('magenta');
                   // handle lines
@@ -513,8 +515,8 @@
                   }
 
                   // fill in the anchor point
-                  drawAPI.setFillStyle('magenta');
-                }
+                  //drawAPI.setFillStyle('magenta');
+                //}
 
                 // anchor
                 drawAPI.beginPath();
@@ -523,12 +525,13 @@
                 drawAPI.fill();
                 drawAPI.stroke();
 
-                if(is_selected) drawAPI.popStyle();
+                //if(is_selected) drawAPI.popStyle();
+                drawAPI.popStyle();
               }
             });
           drawAPI.popStyle();
             // short circuit the rest of the draw call
-            return;
+            //return;
           }
 
           // DRAW ANALYSIS FEEDBACK OPTIONALLY
@@ -818,6 +821,12 @@
         //  console.log(forces);
         //  console.log(forces.map(function(f) { return f.force; }));
         //});
+        workspace.onKeyPress('b', function(x,y) {
+          bezier_mode.display_beziers = !bezier_mode.display_beziers;
+          console.log('flipped bezier display mode to ' +
+                      bezier_mode.display_beziers);
+          rawdisplay.refresh();
+        });
 
 
         // UNDO
