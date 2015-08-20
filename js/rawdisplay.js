@@ -427,6 +427,8 @@ WorkspaceViewport._handle_mousedown = function(px,py,mods) {
   this._mode = (mods.option)? 'pan'  : this._mode;
   this._mode = (mods.cmd)?    'grab' : this._mode;
 
+  console.log('mousedown', this._mode, mods);
+
   var vx = this.xinv(px);
   var vy = this.yinv(py);
 
@@ -884,9 +886,12 @@ exports.setup_canvas = function(canvas_param) {
   }
   //var IS_ON_MACOSX = navigator.userAgent.indexOf('Mac OS X') >= 0;
   canvas.addEventListener('mousedown', function(evt) {
+    console.log('mousedown event', evt);
     extract_fresh_event_data(evt);
 
-    if(evt.which === 1) { // left button
+    var which = evt.which;
+    if(which === 3 && evt.ctrlKey) which = 1; // handle mac ctrl-click
+    if(which === 1) { // left button
       mouse_is_down = true;
       lastx = freshx;
       lasty = freshy;
@@ -902,6 +907,7 @@ exports.setup_canvas = function(canvas_param) {
         drag_modifiers.option = !!evt.altKey;
         drag_modifiers.cmd    = !!evt.ctrlKey;
         drag_modifiers.shift  = !!evt.shiftKey;
+        console.log('whattttt')
 
         var response = vp._handle_mousedown(freshx, freshy, drag_modifiers);
         if(response) {
@@ -938,7 +944,9 @@ exports.setup_canvas = function(canvas_param) {
   }, false);
   canvas.addEventListener('mouseup', function(evt) {
     extract_fresh_event_data(evt);
-    if(evt.which === 1 && drag_target) { // left button
+    var which = evt.which;
+    if(which === 3 && evt.ctrlKey) which = 1; // handle mac ctrl-click
+    if(which === 1 && drag_target) { // left button
       clear_drag();
     }
   }, false);
